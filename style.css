@@ -144,3 +144,14 @@ div.tooltip {
     pointer-events: none;
     font-size: .7rem;
 }
+
+.tooltip {
+  position: absolute;
+  text-align: left;
+  padding: .4rem;
+  background: #333;
+  color: #fff;
+  border-radius: 4px;
+  pointer-events: none;
+  font-size: 12px;
+}
