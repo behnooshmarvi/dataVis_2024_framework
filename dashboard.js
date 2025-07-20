@@ -99,126 +99,182 @@ binSlider.on("input", function() {
   createChart4(bins);
 });
 
+  d3.select("#chart2")
+    .append("div")
+    .attr("id", "regionLegendContainer")
+    .style("margin-top", "10px")
+    .style("text-align", "center");
+
 }
 
 
 function createChart1() {
   chart1.selectAll("*").remove();
 
-  const margin = {top: 20, right: 20, bottom: 60, left: 60},
-        innerWidth = width - margin.left - margin.right,
-        innerHeight = height - margin.top - margin.bottom;
+  if (!currentData || currentData.length === 0) return;
 
+  const radius = Math.min(width, height) / 2 - 50;
   const g = chart1.append("g")
-    .attr("transform", `translate(${margin.left},${margin.top})`);
+    .attr("transform", `translate(${width / 2},${height / 2})`);
+
+  const nestedData = d3.group(currentData, d => d.Client_Region, d => d.Job_Category);
+
+  function buildHierarchy(groupedData) {
+  const root = { name: "root", children: [] };
+  for (const [region, categories] of groupedData.entries()) {
+    const regionNode = { name: region, children: [] };
+    for (const [category, records] of categories.entries()) {
+      const totalJobs = d3.sum(records, r => r.Job_Completed);
+      regionNode.children.push({ name: category, value: totalJobs });
+    }
+    root.children.push(regionNode);
+  }
+  return root;
+}
+
+
+  const rootData = buildHierarchy(nestedData);
+  const root = d3.hierarchy(rootData).sum(d => d.value);
+
+  d3.partition().size([2 * Math.PI, radius])(root);
+
+  const arc = d3.arc()
+    .startAngle(d => d.x0)
+    .endAngle(d => d.x1)
+    .innerRadius(d => d.y0)
+    .outerRadius(d => d.y1);
 
   const regions = [...new Set(currentData.map(d => d.Client_Region))];
-  const categories = [...new Set(currentData.map(d => d.Job_Category))];
-
-  const dataPerRegion = regions.map(region => {
-    const regionData = currentData.filter(d => d.Client_Region === region);
-    const counts = {};
-    categories.forEach(cat => counts[cat] = regionData.filter(d => d.Job_Category === cat).length);
-    return {region, ...counts};
-  });
-
-  const stack = d3.stack().keys(categories);
-  const series = stack(dataPerRegion);
-
-  const x = d3.scaleBand()
-    .domain(regions)
-    .range([0, innerWidth])
-    .padding(0.3);
-
-  const y = d3.scaleLinear()
-    .domain([0, d3.max(dataPerRegion, d => d3.sum(categories, k => d[k]))]).nice()
-    .range([innerHeight, 0]);
-
-  const color = d3.scaleOrdinal()
-    .domain(categories)
-    .range(d3.schemeCategory10);
+  const regionColor = d3.scaleOrdinal().domain(regions).range(d3.schemeTableau10);
 
   const tooltip = d3.select("body").append("div")
     .attr("class", "tooltip")
     .style("opacity", 0);
 
-  g.selectAll("g.layer")
-    .data(series)
-    .enter().append("g")
-    .attr("fill", d => color(d.key))
-    .selectAll("rect")
-    .data(d => d)
-    .enter().append("rect")
-    .attr("x", d => x(d.data.region))
-    .attr("y", d => y(d[1]))
-    .attr("height", d => y(d[0]) - y(d[1]))
-    .attr("width", x.bandwidth())
-    .on("mouseover", function(event, d) {
-      d3.select(this).style("opacity", 0.6);
+  const categoryColorMap = new Map();
+  for (const region of regions) {
+    const base = d3.color(regionColor(region));
+    const interpolator = d3.interpolateRgb("white", base);
+    categoryColorMap.set(region, interpolator);
+  }
 
-      const cat = this.parentNode.__data__.key;
-      tooltip.transition().duration(200).style("opacity", 0.9);
-      tooltip.html(`<strong>Region:</strong> ${d.data.region}<br>
-                    <strong>Category:</strong> ${cat}<br>
-                    <strong>Count:</strong> ${d.data[cat]}`)
-        .style("left", (event.pageX + 10) + "px")
-        .style("top", (event.pageY - 28) + "px");
+  const regionCategoryCount = new Map();
+  root.children.forEach(regionNode => {
+    regionCategoryCount.set(regionNode.data.name, regionNode.children.length);
+  });
+
+  // Draw arcs
+  g.selectAll("path")
+    .data(root.descendants().filter(d => d.depth))
+    .enter().append("path")
+    .attr("d", arc)
+    .style("fill", d => {
+      if (d.depth === 1) return regionColor(d.data.name);
+      if (d.depth === 2) {
+        const region = d.parent.data.name;
+        const index = d.parent.children.findIndex(c => c === d);
+        const total = regionCategoryCount.get(region);
+        return categoryColorMap.get(region)((index + 1) / total);
+      }
+      return "#ccc";
     })
+    .style("stroke", d => d.depth === 2 ? regionColor(d.parent.data.name) : "none")
+    .style("stroke-width", d => d.depth === 2 ? "1px" : "0px")
+   .on("mouseover", function (event, d) {
+  d3.select(this).style("opacity", 0.7);
+  tooltip.transition().duration(200).style("opacity", 0.9);
+
+  const pathNames = d.ancestors()
+    .map(d => d.data.name)
+    .reverse()
+    .filter(name => name !== "root");  // this ensures 'root' is excluded
+
+  tooltip.html(`${pathNames.join(" → ")}<br>Value: ${d.value}`)
+    .style("left", (event.pageX + 10) + "px")
+    .style("top", (event.pageY - 28) + "px");
+})
+
     .on("mouseout", function() {
       d3.select(this).style("opacity", 1);
       tooltip.transition().duration(500).style("opacity", 0);
-    });
+    })
+.on("click", function(event, d) {
+  if (d.depth === 1) {
+    selectedRegion = d.data.name;
+    const selectedColor = regionColor(d.data.name);
+    createChart2("Earnings_USD", selectedRegion, selectedColor);
+    drawRegionLegend(selectedRegion);
+  }
+});
 
-  g.append("g").call(d3.axisLeft(y));
-  g.append("g")
-    .attr("transform", `translate(0,${innerHeight})`)
-    .call(d3.axisBottom(x))
-    .selectAll("text")
-    .attr("transform", "rotate(-40)")
-    .style("text-anchor", "end");
 
-  // Move legend below the chart
-  const legend = chart1.append("g")
-    .attr("transform", `translate(${margin.left},${height - margin.bottom + 40})`);
-  
-  categories.forEach((cat, i) => {
-    const legendRow = legend.append("g")
-      .attr("transform", `translate(${i * 120},0)`); // horizontal spacing
+  // Region labels
+  g.selectAll("text.region-label")
+    .data(root.descendants().filter(d => d.depth === 1))
+    .enter().append("text")
+    .attr("class", "region-label")
+    .attr("transform", d => {
+      const angle = (d.x0 + d.x1) / 2;
+      const radiusMid = (d.y0 + d.y1) / 2;
+      const x = Math.sin(angle) * radiusMid;
+      const y = -Math.cos(angle) * radiusMid;
+      return `translate(${x},${y})`;
+    })
+    .attr("text-anchor", "middle")
+    .attr("alignment-baseline", "middle")
+    .attr("font-weight", "bold")
+    .attr("fill", "#000")
+    .text(d => d.data.name);
 
-    legendRow.append("rect")
-      .attr("width", 10)
-      .attr("height", 10)
-      .attr("fill", color(cat));
-
-    legendRow.append("text")
-      .attr("x", 15)
-      .attr("y", 10)
-      .text(cat);
-  });
+  // Category labels rotated
+  g.selectAll("text.category-label")
+    .data(root.descendants().filter(d => d.depth === 2))
+    .enter().append("text")
+    .attr("class", "category-label")
+    .attr("transform", d => {
+      const angle = ((d.x0 + d.x1) / 2) * 180 / Math.PI - 90;
+      const r = (d.y0 + d.y1) / 2;
+      const x = Math.cos((d.x0 + d.x1) / 2 - Math.PI / 2) * r;
+      const y = Math.sin((d.x0 + d.x1) / 2 - Math.PI / 2) * r;
+      return `translate(${x},${y}) rotate(${angle})`;
+    })
+    .attr("text-anchor", "middle")
+    .attr("alignment-baseline", "middle")
+    .attr("font-size", "7px")
+    .attr("fill", "#000")
+    .text(d => d.data.name);
 }
 
 
-function createChart2(metric) {
+
+
+
+
+function createChart2(metric, regionFilter = null, lineColor = "#1f77b4"){
   chart2.selectAll("*").remove();
 
-  const margin = {top: 20, right: 20, bottom: 80, left: 60},
+  const margin = { top: 20, right: 20, bottom: 80, left: 60 },
         innerWidth = width - margin.left - margin.right,
         innerHeight = height - margin.top - margin.bottom;
 
   const g = chart2.append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
+  const filteredData = regionFilter
+    ? currentData.filter(d => d.Client_Region === regionFilter)
+    : currentData;
+
   const binned = d3.rollups(
-    currentData.filter(d => !isNaN(+d.Job_Duration_Days) && !isNaN(+d[metric])),   // ✅ use metric
-    v => d3.mean(v, d => +d[metric]),                                              // ✅ use metric
+    filteredData.filter(d => !isNaN(+d.Job_Duration_Days) && !isNaN(+d[metric])),
+    v => d3.mean(v, d => +d[metric]),
     d => {
       const day = +d.Job_Duration_Days;
       const binStart = Math.floor(day / 5) * 5;
       return `${binStart}-${binStart + 4}`;
     }
-  ).map(([bin, avgValue]) => ({bin, avgValue}));
+  ).map(([bin, avgValue]) => ({ bin, avgValue }));
 
-  binned.sort((a, b) => parseInt(a.bin.split('-')[0], 10) - parseInt(b.bin.split('-')[0], 10));
+  binned.sort((a, b) => parseInt(a.bin) - parseInt(b.bin));
 
   const x = d3.scalePoint()
     .domain(binned.map(d => d.bin))
@@ -226,29 +282,30 @@ function createChart2(metric) {
     .padding(0.5);
 
   const y = d3.scaleLinear()
-    .domain([0, d3.max(binned, d => d.avgValue)]).nice()
+    .domain([
+      d3.min(binned, d => d.avgValue),
+      d3.max(binned, d => d.avgValue)
+    ])
+    .nice()
     .range([innerHeight, 0]);
 
-const linePath = g.append("path")
-  .datum(binned)
-  .attr("fill", "none")
-  .attr("stroke", "#1f77b4")
-  .attr("stroke-width", 2)
-  .attr("d", d3.line()
-    .x(d => x(d.bin))
-    .y(d => y(d.avgValue)));
+  const linePath = g.append("path")
+    .datum(binned)
+    .attr("fill", "none")
+.attr("stroke", lineColor)
+    .attr("stroke-width", 2)
+    .attr("d", d3.line()
+      .x(d => x(d.bin))
+      .y(d => y(d.avgValue)));
 
-// Animation: draw line smoothly
-const totalLength = linePath.node().getTotalLength();
-
-linePath
-  .attr("stroke-dasharray", `${totalLength} ${totalLength}`)
-  .attr("stroke-dashoffset", totalLength)
-  .transition()
-  .duration(2000)  // adjust duration as desired
-  .ease(d3.easeLinear)
-  .attr("stroke-dashoffset", 0);
-
+  const totalLength = linePath.node().getTotalLength();
+  linePath
+    .attr("stroke-dasharray", `${totalLength} ${totalLength}`)
+    .attr("stroke-dashoffset", totalLength)
+    .transition()
+    .duration(2000)
+    .ease(d3.easeLinear)
+    .attr("stroke-dashoffset", 0);
 
   g.append("g").call(d3.axisLeft(y).tickSize(-innerWidth).tickPadding(10));
 
@@ -274,87 +331,112 @@ linePath
     .style("text-anchor", "middle")
     .style("font-weight", "bold")
     .text(metric.replace(/_/g, " "));
+
+  updateRegionLegend(regionFilter);
 }
 
+function updateRegionLegend(region) {
+  const container = d3.select("#regionLegendContainer");
+  container.selectAll("*").remove();
+
+  if (region) {
+    container.append("span")
+      .style("padding", "6px 12px")
+      .style("background", "#eee")
+      .style("border", "1px solid #ccc")
+      .style("cursor", "pointer")
+      .text("Region: " + region)
+      .on("click", () => {
+        selectedRegion = null;
+        const metric = d3.select("#chart2YSelect").property("value");
+        createChart2(metric);
+      });
+  }
+}
 
 
 function createChart3(xAttr = "Experience_Level", yAttr = "Earnings_USD") {
   chart3.selectAll("*").remove();
 
   const margin = { top: 20, right: 150, bottom: 60, left: 60 },
-    innerWidth = width - margin.left - margin.right,
-    innerHeight = height - margin.top - margin.bottom;
+        innerWidth = width - margin.left - margin.right,
+        innerHeight = height - margin.top - margin.bottom;
 
   const g = chart3.append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
-  // Get unique categories for x-axis
-  const xValues = [...new Set(currentData.map(d => d[xAttr]))];
+  const xValues = [...new Set(currentData.map(d => d[xAttr]?.toString().trim()))];
 
-  // Aggregate per x value
-  const dataPerGroup = xValues.map(xVal => {
-    const groupData = currentData.filter(d => d[xAttr] === xVal);
+  const grouped = xValues.map(xVal => {
+    const values = currentData
+      .filter(d => d[xAttr]?.toString().trim() === xVal)
+      .map(d => +d[yAttr])
+      .filter(v => !isNaN(v))
+      .sort(d3.ascending);
+
+    if (values.length === 0) return { xVal, q1: 0, median: 0, q3: 0, min: 0, max: 0 };
+
+    const q1 = d3.quantile(values, 0.25);
+    const median = d3.quantile(values, 0.5);
+    const q3 = d3.quantile(values, 0.75);
+    const iqr = q3 - q1;
+    const lowerWhisker = values.find(v => v >= q1 - 1.5 * iqr);
+    const upperWhisker = values.reverse().find(v => v <= q3 + 1.5 * iqr);
+
     return {
-      xVal,
-      yValue: d3.mean(groupData, d => +d[yAttr]),
-      count: groupData.length
+      xVal, q1, median, q3,
+      min: lowerWhisker,
+      max: upperWhisker
     };
   });
 
-  // x scale
   const x = d3.scalePoint()
     .domain(xValues)
     .range([0, innerWidth])
     .padding(0.5);
 
-  // y scale
-  const yMax = d3.max(dataPerGroup, d => d.yValue);
   const y = d3.scaleLinear()
-    .domain([0, yMax * 1.1])
+    .domain([
+      d3.min(grouped, d => d.min),
+      d3.max(grouped, d => d.max)
+    ])
     .nice()
     .range([innerHeight, 0]);
 
-  // bubble size scale
-  const size = d3.scaleSqrt()
-    .domain([0, d3.max(dataPerGroup, d => d.count)])
-    .range([10, 50]);
+  // Whiskers
+  g.selectAll("line.stem")
+    .data(grouped)
+    .enter().append("line")
+    .attr("class", "stem")
+    .attr("x1", d => x(d.xVal))
+    .attr("x2", d => x(d.xVal))
+    .attr("y1", d => y(d.min))
+    .attr("y2", d => y(d.max))
+    .attr("stroke", "black");
 
-  // ✅ Tooltip
-  const tooltip = d3.select("body").append("div")
-    .attr("class", "tooltip")
-    .style("opacity", 0);
+  // Boxes
+  g.selectAll("rect.box")
+    .data(grouped)
+    .enter().append("rect")
+    .attr("class", "box")
+    .attr("x", d => x(d.xVal) - 20)
+    .attr("y", d => y(d.q3))
+    .attr("width", 40)
+    .attr("height", d => y(d.q1) - y(d.q3))
+    .attr("fill", "#d3d3d3")
+    .attr("opacity", 0.5);
 
-  // ✅ Draw bubbles
-  g.selectAll("circle")
-    .data(dataPerGroup)
-    .enter().append("circle")
-    .attr("cx", d => x(d.xVal))
-    .attr("cy", d => y(d.yValue))
-    .attr("r", d => size(d.count))
-    .attr("fill", "purple")
-    .attr("opacity", 0.5)
-    .style("cursor", "pointer")
-    .on("mouseover", function (event, d) {
-      d3.select(this)
-        .transition().duration(100)
-        .attr("opacity", 0.8)
-        .attr("stroke", "black")
-        .attr("stroke-width", 2);
-
-      tooltip.transition().duration(200).style("opacity", 0.9);
-      tooltip.html(`<strong>${xAttr}:</strong> ${d.xVal}<br>
-                    <strong>Avg ${yAttr}:</strong> ${Math.round(d.yValue)}<br>
-                    <strong>Count:</strong> ${d.count}`)
-        .style("left", (event.pageX + 10) + "px")
-        .style("top", (event.pageY - 28) + "px");
-    })
-    .on("mouseout", function () {
-      d3.select(this)
-        .transition().duration(200)
-        .attr("opacity", 0.5)
-        .attr("stroke", "none");
-      tooltip.transition().duration(500).style("opacity", 0);
-    });
+  // Median lines
+  g.selectAll("line.median")
+    .data(grouped)
+    .enter().append("line")
+    .attr("class", "median")
+    .attr("x1", d => x(d.xVal) - 20)
+    .attr("x2", d => x(d.xVal) + 20)
+    .attr("y1", d => y(d.median))
+    .attr("y2", d => y(d.median))
+    .attr("stroke", "black")
+    .attr("stroke-width", 2);
 
   // Axes
   g.append("g").call(d3.axisLeft(y));
@@ -365,7 +447,6 @@ function createChart3(xAttr = "Experience_Level", yAttr = "Earnings_USD") {
     .attr("transform", "rotate(-40)")
     .style("text-anchor", "end");
 
-  // Axis labels
   g.append("text")
     .attr("x", innerWidth / 2)
     .attr("y", innerHeight + margin.bottom - 10)
@@ -381,6 +462,8 @@ function createChart3(xAttr = "Experience_Level", yAttr = "Earnings_USD") {
     .style("font-weight", "bold")
     .text(yAttr.replace(/_/g, " "));
 }
+
+
 
 
 
@@ -412,6 +495,18 @@ function createChart4(binNumber = 20) {
     .domain([0, d3.max(bins, d => d.length)]).nice()
     .range([innerHeight, 0]);
 
+  // Define SVG shadow filter
+  const defs = chart4.append("defs");
+  const shadow = defs.append("filter")
+    .attr("id", "drop-shadow")
+    .attr("height", "130%");
+  shadow.append("feDropShadow")
+    .attr("dx", 1)
+    .attr("dy", 2)
+    .attr("stdDeviation", 2)
+    .attr("flood-color", "#333")
+    .attr("flood-opacity", 0.4);
+
   const tooltip = d3.select("body").append("div")
     .attr("class", "tooltip")
     .style("opacity", 0);
@@ -420,13 +515,14 @@ function createChart4(binNumber = 20) {
     .data(bins)
     .enter().append("rect")
     .attr("x", d => x(d.x0) + 1)
-    .attr("y", innerHeight) // start from bottom for animation
-    .attr("width", d => Math.max(x(d.x1) - x(d.x0) - 1, 0)) // avoid negative widths
-    .attr("height", 0) // start collapsed
-    .style("fill", "#1f77b4")
-    .style("opacity", 0.8)
+    .attr("y", innerHeight)
+    .attr("width", d => Math.max(x(d.x1) - x(d.x0) - 1, 0))
+    .attr("height", 0)
+    .style("fill", "#444")
+    .style("filter", "url(#drop-shadow)")
+    .style("opacity", 0.9)
     .on("mouseover", function(event, d) {
-      d3.select(this).style("fill", "#ff7f0e");
+      d3.select(this).style("fill", "#888");
       tooltip.transition().duration(200).style("opacity", 0.9);
       tooltip.html(`<strong>Range:</strong> ${Math.round(d.x0)} - ${Math.round(d.x1)}<br>
                     <strong>Count:</strong> ${d.length}`)
@@ -434,11 +530,11 @@ function createChart4(binNumber = 20) {
         .style("top", (event.pageY - 28) + "px");
     })
     .on("mouseout", function() {
-      d3.select(this).style("fill", "#1f77b4");
+      d3.select(this).style("fill", "#444");
       tooltip.transition().duration(500).style("opacity", 0);
     });
 
-  // Animate bars growing to final height
+  // Animate bars
   bars.transition()
     .duration(800)
     .attr("y", d => y(d.length))
@@ -463,6 +559,7 @@ function createChart4(binNumber = 20) {
     .style("text-anchor", "middle")
     .text("Count");
 }
+
 
 
 
