@@ -10,6 +10,9 @@
 */
 
 let chart1, chart2, chart3, chart4;
+let selectedRegionColor = "#a4a2a2";
+let selectedMetric = "Earnings_USD";
+let selectedRegion = null;
 
 
 
@@ -48,23 +51,34 @@ function initDashboard(_data) {
     createChart4();
 
       // Dropdown options for Chart 2
-    const yOptions = ["Earnings_USD", "Hourly_Rate", "Job_Success_Rate"];
-    const ySelect = d3.select("#chart2YSelect");
-    ySelect.selectAll("option")
-      .data(yOptions)
-      .enter()
-      .append("option")
-      .attr("value", d => d)
-      .text(d => d.replace(/_/g, " "));
+const yOptions = ["Earnings_USD", "Hourly_Rate", "Job_Success_Rate"];
+const ySelect = d3.select("#chart2YSelect");
+ySelect.selectAll("option")
+  .data(yOptions)
+  .enter()
+  .append("option")
+  .attr("value", d => d)
+  .text(d => d.replace(/_/g, " "));
 
-    // Initial chart 2 render
-    createChart2("Earnings_USD");
+// Explicitly set default value to match first render
+ySelect.property("value", "Earnings_USD");
 
-    // Change handler
-    ySelect.on("change", function() {
-      const selectedMetric = d3.select(this).property("value");
-      createChart2(selectedMetric);
-    });
+// Initial chart 2 render
+createChart2("Earnings_USD");
+
+// Change handler
+ySelect.on("change", function () {
+const selectedMetric = d3.select("#chart2YSelect").property("value");
+  if (selectedRegion) {
+    createChart2(selectedMetric, selectedRegion, selectedRegionColor);
+  } else {
+    createChart2(selectedMetric);
+  }
+});
+
+
+
+
 
     // Dropdown options for Chart 3
     const xOptionsChart3 = ["Experience_Level", "Client_Region", "Job_Category"];
@@ -196,11 +210,14 @@ function createChart1() {
 .on("click", function(event, d) {
   if (d.depth === 1) {
     selectedRegion = d.data.name;
-    const selectedColor = regionColor(d.data.name);
-    createChart2("Earnings_USD", selectedRegion, selectedColor);
+    selectedRegionColor = regionColor(d.data.name); 
+    const selectedMetric = d3.select("#chart2YSelect").property("value");
+    createChart2(selectedMetric, selectedRegion, selectedRegionColor);
     drawRegionLegend(selectedRegion);
   }
 });
+
+
 
 
   // Region labels
@@ -344,11 +361,13 @@ function updateRegionLegend(region) {
       .style("border", "1px solid #ccc")
       .style("cursor", "pointer")
       .text("Region: " + region)
-      .on("click", () => {
-        selectedRegion = null;
-        const metric = d3.select("#chart2YSelect").property("value");
-        createChart2(metric);
-      });
+.on("click", () => {
+  selectedRegion = null;
+  selectedRegionColor = "#a4a2a2"; 
+  const metric = d3.select("#chart2YSelect").property("value");
+  createChart2(metric);
+});
+
   }
 }
 
