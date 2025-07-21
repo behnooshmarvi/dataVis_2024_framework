@@ -9,17 +9,12 @@
 * All rights reserved.
 */
 
-// TODO: File for Part 2
-// TODO: You can edit this file as you wish - add new methods, variables etc. or change/delete existing ones.
-
-// TODO: use descriptive names for variables
 let chart1, chart2, chart3, chart4;
 
 
 
 function initDashboard(_data) {
 
-    // TODO: Initialize the environment (SVG, etc.) and call the nedded methods
 
     //  SVG container
     chart1 = d3.select("#chart1").append("svg")
@@ -52,7 +47,7 @@ function initDashboard(_data) {
     createChart3();
     createChart4();
 
-        // Dropdown options for Chart 2
+      // Dropdown options for Chart 2
     const yOptions = ["Earnings_USD", "Hourly_Rate", "Job_Success_Rate"];
     const ySelect = d3.select("#chart2YSelect");
     ySelect.selectAll("option")
@@ -187,7 +182,7 @@ function createChart1() {
   const pathNames = d.ancestors()
     .map(d => d.data.name)
     .reverse()
-    .filter(name => name !== "root");  // this ensures 'root' is excluded
+    .filter(name => name !== "root");  
 
   tooltip.html(`${pathNames.join(" → ")}<br>Value: ${d.value}`)
     .style("left", (event.pageX + 10) + "px")
@@ -250,7 +245,7 @@ function createChart1() {
 
 
 
-function createChart2(metric, regionFilter = null, lineColor = "#1f77b4"){
+function createChart2(metric, regionFilter = null, lineColor = "#a4a2a2"){
   chart2.selectAll("*").remove();
 
   const margin = { top: 20, right: 20, bottom: 80, left: 60 },
@@ -294,6 +289,7 @@ function createChart2(metric, regionFilter = null, lineColor = "#1f77b4"){
     .attr("fill", "none")
 .attr("stroke", lineColor)
     .attr("stroke-width", 2)
+    .attr("stroke-dasharray", "4 2")
     .attr("d", d3.line()
       .x(d => x(d.bin))
       .y(d => y(d.avgValue)));
@@ -321,7 +317,8 @@ function createChart2(metric, regionFilter = null, lineColor = "#1f77b4"){
     .attr("x", innerWidth / 2)
     .attr("y", innerHeight + margin.bottom - 25)
     .style("text-anchor", "middle")
-    .style("font-weight", "bold")
+  .style("font-weight", "bold")
+  .style("font-size", "14px")
     .text("Job Duration Bins (Days)");
 
   g.append("text")
@@ -330,6 +327,7 @@ function createChart2(metric, regionFilter = null, lineColor = "#1f77b4"){
     .attr("y", -margin.left + 15)
     .style("text-anchor", "middle")
     .style("font-weight", "bold")
+      .style("font-size", "14px")
     .text(metric.replace(/_/g, " "));
 
   updateRegionLegend(regionFilter);
@@ -358,7 +356,7 @@ function updateRegionLegend(region) {
 function createChart3(xAttr = "Experience_Level", yAttr = "Earnings_USD") {
   chart3.selectAll("*").remove();
 
-  const margin = { top: 20, right: 150, bottom: 60, left: 60 },
+  const margin = { top: 20, right: 150, bottom: 100, left: 60 },
         innerWidth = width - margin.left - margin.right,
         innerHeight = height - margin.top - margin.bottom;
 
@@ -426,7 +424,7 @@ function createChart3(xAttr = "Experience_Level", yAttr = "Earnings_USD") {
     .attr("fill", "#d3d3d3")
     .attr("opacity", 0.5);
 
-  // Median lines
+    // Median lines
   g.selectAll("line.median")
     .data(grouped)
     .enter().append("line")
@@ -440,19 +438,28 @@ function createChart3(xAttr = "Experience_Level", yAttr = "Earnings_USD") {
 
   // Axes
   g.append("g").call(d3.axisLeft(y));
-  g.append("g")
-    .attr("transform", `translate(0,${innerHeight})`)
-    .call(d3.axisBottom(x))
-    .selectAll("text")
-    .attr("transform", "rotate(-40)")
-    .style("text-anchor", "end");
+const xAxis = g.append("g")
+  .attr("transform", `translate(0,${innerHeight})`)
+  .call(d3.axisBottom(x));
 
-  g.append("text")
-    .attr("x", innerWidth / 2)
-    .attr("y", innerHeight + margin.bottom - 10)
-    .style("text-anchor", "middle")
-    .style("font-weight", "bold")
-    .text(xAttr.replace(/_/g, " "));
+xAxis.selectAll("text")
+  .attr("transform", "rotate(-40)")
+  .style("text-anchor", "end")
+  .style("font-size", "12px")
+  .attr("dx", "-0.5em")
+  .attr("dy", "0.5em");
+
+g.append("text")
+  .attr("class", "x-axis-label")
+  .attr("x", innerWidth / 2)
+  .attr("y", innerHeight + 90) 
+  .style("text-anchor", "middle")
+  .style("font-weight", "bold")
+  .style("font-size", "14px")
+  .text(xAttr.replace(/_/g, " "));
+
+
+
 
   g.append("text")
     .attr("transform", "rotate(-90)")
@@ -460,6 +467,7 @@ function createChart3(xAttr = "Experience_Level", yAttr = "Earnings_USD") {
     .attr("y", -margin.left + 15)
     .style("text-anchor", "middle")
     .style("font-weight", "bold")
+      .style("font-size", "14px")
     .text(yAttr.replace(/_/g, " "));
 }
 
@@ -489,10 +497,18 @@ function createChart4(binNumber = 20) {
     .domain(x.domain())
     .thresholds(x.ticks(binNumber));
 
-  const bins = histogram(earnings);
+const earningsWithJobs = currentData
+  .filter(d => !isNaN(+d.Earnings_USD) && !isNaN(+d.Job_Completed))
+  .map(d => ({ earnings: +d.Earnings_USD, jobs: +d.Job_Completed }));
+
+const bins = histogram(earningsWithJobs.map(d => d.earnings)).map((bin, i) => {
+  const binJobs = earningsWithJobs.filter(d => d.earnings >= bin.x0 && d.earnings < bin.x1);
+  const completed = d3.sum(binJobs, d => d.jobs);
+  return Object.assign(bin, { completed });
+});
 
   const y = d3.scaleLinear()
-    .domain([0, d3.max(bins, d => d.length)]).nice()
+.domain([0, d3.max(bins, d => d.completed)])
     .range([innerHeight, 0]);
 
   // Define SVG shadow filter
@@ -524,8 +540,9 @@ function createChart4(binNumber = 20) {
     .on("mouseover", function(event, d) {
       d3.select(this).style("fill", "#888");
       tooltip.transition().duration(200).style("opacity", 0.9);
-      tooltip.html(`<strong>Range:</strong> ${Math.round(d.x0)} - ${Math.round(d.x1)}<br>
-                    <strong>Count:</strong> ${d.length}`)
+     tooltip.html(`<strong>Range:</strong> ${Math.round(d.x0)} - ${Math.round(d.x1)}<br>
+              <strong>Completed Jobs:</strong> ${d.completed}`)
+
         .style("left", (event.pageX + 10) + "px")
         .style("top", (event.pageY - 28) + "px");
     })
@@ -537,8 +554,9 @@ function createChart4(binNumber = 20) {
   // Animate bars
   bars.transition()
     .duration(800)
-    .attr("y", d => y(d.length))
-    .attr("height", d => innerHeight - y(d.length));
+    .attr("y", d => y(d.completed))
+.attr("height", d => innerHeight - y(d.completed))
+
 
   g.append("g")
     .attr("transform", `translate(0,${innerHeight})`)
@@ -550,6 +568,8 @@ function createChart4(binNumber = 20) {
     .attr("x", innerWidth / 2)
     .attr("y", innerHeight + margin.bottom - 10)
     .style("text-anchor", "middle")
+      .style("font-weight", "bold")
+  .style("font-size", "14px")
     .text("Average Earnings");
 
   g.append("text")
@@ -557,13 +577,14 @@ function createChart4(binNumber = 20) {
     .attr("x", -innerHeight / 2)
     .attr("y", -margin.left + 15)
     .style("text-anchor", "middle")
+    .style("font-weight", "bold")
+      .style("font-size", "14px")
     .text("Count");
 }
 
 
 
 
-// clear files if changes (dataset) occur
 function clearDashboard() {
 
     chart1.selectAll("*").remove();

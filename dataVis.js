@@ -79,17 +79,17 @@ function init() {
       currentData = parsedData;
 
       console.log("Parsed data:", parsedData);
-      // ✅ Extract numeric dimensions only (ignore labels)
+      // Extract numeric dimensions only (ignore labels)
       dimensions = Object.keys(parsedData[0]).filter(
         (key) => !isNaN(+parsedData[0][key])
       );
 
-      // ✅ Call the visualization setup functions
+      //  Call the visualization setup functions
       initVis(parsedData);
       CreateDataTable(parsedData);
       initDashboard(parsedData);
     };
-    // ✅ Read the uploaded file
+    //  Read the uploaded file
     reader.readAsText(fileInput.files[0]);
   });
 }
@@ -319,7 +319,7 @@ circles.enter()
   .attr("class", "dot")
   .on("mouseover", function (event, d) {
   const tooltip = d3.select("#tooltip");
-  const labelKey = Object.keys(d).find(k => isNaN(+d[k])); // Get label column (e.g. name)
+  const labelKey = Object.keys(d).find(k => isNaN(+d[k])); 
 
   tooltip
     .style("opacity", 1)
